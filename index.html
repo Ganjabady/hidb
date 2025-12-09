@@ -205,46 +205,59 @@
         }
 
         async function executeSearch(page = 0) {
-            const rawInput = document.getElementById('inp-omni').value;
-            const scope = document.getElementById('search-scope').value;
-            const input = toEnglishDigits(normalizePersian(rawInput));
-            
-            if (!input || input.length < 2) return alert("لطفا حداقل ۲ کاراکتر وارد کنید");
+    const rawInput = document.getElementById('inp-omni').value;
+    // scope دیگر استفاده نمی‌شود اما برای جلوگیری از خطا آن را نگه می‌داریم
+    // const scope = document.getElementById('search-scope').value; 
+    const input = toEnglishDigits(normalizePersian(rawInput));
 
-            setLoading(true);
-            currentSearchPage = page;
+    if (!input || input.length < 2) {
+        alert("لطفا حداقل ۲ کاراکتر وارد کنید");
+        return;
+    }
 
-            try {
-                if (page === 0) {
-                    let c = [];
-                    if (scope === 'ALL' || scope === 'NATIONAL_CODE') if (/^\d+$/.test(input)) { 
-                        c.push(`NATIONAL_CODE LIKE '%${input}%'`); 
-                        if(!input.startsWith('0')) c.push(`NATIONAL_CODE = '${input}'`); 
-                    }
-                    if (scope === 'ALL' || scope === 'MOBILE') if (/^\d+$/.test(input)) c.push(`MOBILE LIKE '%${input}%'`);
-                    if (scope === 'ALL' || scope === 'FULL_NAME') { 
-                        c.push(`FULL_NAME LIKE '%${input}%'`); 
-                        if(scope === 'ALL') c.push(`FATHER_NAME LIKE '%${input}%'`); 
-                    }
-                    if (scope === 'ALL') { 
-                        c.push(`CITY_NAME LIKE '%${input}%'`); 
-                        c.push(`ADDRESS LIKE '%${input}%'`); 
-                    }
-                    if (c.length === 0) c.push(`FULL_NAME LIKE '%${input}%'`); 
-                    activeQueryString = c.join(" OR ");
-                }
+    setLoading(true);
+    currentSearchPage = page;
 
-                const offset = page * HF_LENGTH;
-                const url = `https://datasets-server.huggingface.co/filter?dataset=${HF_DATASET}&config=${HF_CONFIG}&split=${HF_SPLIT}&where=${encodeURIComponent(activeQueryString)}&offset=${offset}&length=${HF_LENGTH}`;
-
-                const response = await fetch(url);
-                if (!response.ok) throw new Error("API Error");
-                
-                const json = await response.json();
-                renderResults(json.rows.map(r => r.row), json.num_rows_total);
-
-            } catch (error) { showErrorState(error.message); } finally { setLoading(false); }
+    try {
+        // برای جستجوهای جدید (صفحه اول)، عبارت جستجو را ذخیره می‌کنیم
+        if (page === 0) {
+            activeQueryString = input;
         }
+
+        const offset = page * HF_LENGTH;
+        
+        // URL جدید با استفاده از اندپوینت /search و پارامتر query
+        const url = `https://datasets-server.huggingface.co/search?dataset=${HF_DATASET}&config=${HF_CONFIG}&split=${HF_SPLIT}&query=${encodeURIComponent(activeQueryString)}&offset=${offset}&length=${HF_LENGTH}`;
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            // تلاش برای خواندن پیام خطا از سرور
+            let errorDetail = "خطای API";
+            try {
+                const errorJson = await response.json();
+                if (errorJson.error) {
+                    errorDetail = errorJson.error;
+                }
+            } catch (e) {
+                errorDetail = `خطای HTTP: ${response.status}`;
+            }
+            throw new Error(errorDetail);
+        }
+        
+        const json = await response.json();
+        
+        // ساختار پاسخ /search کمی متفاوت است، باید به ردیف‌های اصلی دسترسی پیدا کنیم
+        const rows = json.rows.map(r => r.row);
+        renderResults(rows, json.num_rows_total);
+
+    } catch (error) { 
+        console.error("Search Error:", error);
+        showErrorState("خطا در ارتباط با سرور. ممکن است سرویس موقتا در دسترس نباشد."); 
+    } finally { 
+        setLoading(false); 
+    }
+}
+
 
         function renderResults(rows, totalRows, updateCount = true) {
             lastResults = rows;
